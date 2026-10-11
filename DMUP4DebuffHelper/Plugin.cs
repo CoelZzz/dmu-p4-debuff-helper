@@ -80,11 +80,15 @@ public sealed class Plugin : IDalamudPlugin
     private readonly HelperWindow helperWindow;
     private readonly P3BlackHoleTracker p3BlackHoleTracker;
     private readonly P3LimitCutTracker p3LimitCutTracker;
+    private readonly GameEventHooks gameEventHooks;
+    private readonly DiscoveryLog discoveryLog;
+    private readonly P1Tracker p1Tracker;
     private readonly List<PartyStatusEntry> currentEntries = [];
     private readonly List<PartyMemberSnapshot> currentMembers = [];
     private readonly List<P4DebuffAssignment> currentAssignments = [];
     private readonly List<P4DebuffAssignment> localAssignments = [];
     private readonly List<P4DebuffAssignment> currentGazeAssignments = [];
+    private readonly List<P4DebuffAssignment> currentPartyCallAssignments = [];
     private readonly List<BossTellSnapshot> currentBossTells = [];
     private readonly List<BossTellSnapshot> currentPullBossTells = [];
     private readonly List<P4DebuffRecord> currentPullDebuffRecords = [];
@@ -98,6 +102,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly Dictionary<string, int> activeDebuffRecordIndexes = new(StringComparer.Ordinal);
     private readonly HashSet<string> activeDebuffKeysLastFrame = new(StringComparer.Ordinal);
     private readonly HashSet<string> activeBossTellKeysLastFrame = new(StringComparer.Ordinal);
+    private readonly Dictionary<P4Boss, string> lastLoggedTellParams = new();
     private readonly HashSet<string> registeredCommands = new(StringComparer.OrdinalIgnoreCase);
     private readonly Queue<string> queuedPartyChatMessages = [];
     private Hook<ActionEffectHandler.Delegates.Receive>? actionEffectHook;
@@ -116,6 +121,8 @@ public sealed class Plugin : IDalamudPlugin
 
     public IReadOnlyList<P4DebuffAssignment> CurrentGazeAssignments => currentGazeAssignments;
 
+    public IReadOnlyList<P4DebuffAssignment> CurrentPartyCallAssignments => currentPartyCallAssignments;
+
     public IReadOnlyList<BossTellSnapshot> CurrentBossTells => currentBossTells;
 
     public IReadOnlyList<P4DebuffRecord> CurrentPullDebuffRecords => currentPullDebuffRecords;
@@ -127,6 +134,10 @@ public sealed class Plugin : IDalamudPlugin
     public P3BlackHoleTracker P3BlackHole => p3BlackHoleTracker;
 
     public P3LimitCutTracker P3LimitCut => p3LimitCutTracker;
+
+    public P1Tracker P1 => p1Tracker;
+
+    public P4CallSetHistory CallSetHistory { get; } = new();
 
     public DmuHelperDisplayMode DisplayMode { get; private set; } = DmuHelperDisplayMode.Empty;
 
@@ -147,6 +158,9 @@ public sealed class Plugin : IDalamudPlugin
 
         p3BlackHoleTracker = new P3BlackHoleTracker(this);
         p3LimitCutTracker = new P3LimitCutTracker();
+        gameEventHooks = new GameEventHooks();
+        discoveryLog = new DiscoveryLog(this, gameEventHooks);
+        p1Tracker = new P1Tracker(this, gameEventHooks);
         configWindow = new ConfigWindow(this);
         helperWindow = new HelperWindow(this)
         {
@@ -194,6 +208,9 @@ public sealed class Plugin : IDalamudPlugin
         Framework.Update -= OnFrameworkUpdate;
         RemoveCommands();
         actionEffectHook?.Dispose();
+        p1Tracker.Dispose();
+        discoveryLog.Dispose();
+        gameEventHooks.Dispose();
 
         windowSystem.RemoveAllWindows();
         configWindow.Dispose();
@@ -345,6 +362,10 @@ public sealed class Plugin : IDalamudPlugin
     {
         FlushQueuedPartyChatMessages(DateTime.UtcNow);
         RefreshStatusSnapshot();
+        if (IsInDmu && Configuration.DiscoveryLogging)
+        {
+            discoveryLog.Update();
+        }
     }
 
     private void OnClientLogin()
@@ -414,6 +435,22 @@ public sealed class Plugin : IDalamudPlugin
             }
         }
 
+        if (header != null && ClientState.TerritoryType == DmuTerritoryId)
+        {
+            p1Tracker.OnActionEffect(header->ActionId);
+        }
+
+        if (Configuration.DiscoveryLogging && header != null && ClientState.TerritoryType == DmuTerritoryId)
+        {
+            var targetIds = new List<uint>(header->NumTargets);
+            for (var i = 0; i < header->NumTargets; i++)
+            {
+                targetIds.Add((uint)targetEntityIds[i].ObjectId);
+            }
+
+            discoveryLog.LogActionEffect(casterEntityId, header->ActionId, targetIds);
+        }
+
         actionEffectHook?.Original(casterEntityId, casterPtr, targetPos, header, effects, targetEntityIds);
     }
 
@@ -462,7 +499,7 @@ public sealed class Plugin : IDalamudPlugin
                     continue;
                 }
 
-                if (!isLocalMember && status.StatusId != CursedShriekStatusId)
+                if (!isLocalMember && status.StatusId != CursedShriekStatusId && !P4Calls.PartyStatusIds.Contains(status.StatusId))
                 {
                     continue;
                 }
@@ -479,7 +516,8 @@ public sealed class Plugin : IDalamudPlugin
                     GetSmoothedStatusRemainingTime(entryKey, status.RemainingTime, now),
                     true,
                     watchedStatus!.SortOrder,
-                    now));
+                    now,
+                    member.ClassJob.RowId));
             }
 
             partyIndex++;
@@ -501,6 +539,7 @@ public sealed class Plugin : IDalamudPlugin
         RefreshBossTellSnapshots();
         RefreshAssignments();
         RefreshPartyGazeAssignments();
+        RefreshPartyCallAssignments();
         RefreshLocalAssignments();
         UpdatePullTracking();
         var p4LiveSignal = HasP4LiveSignal();
@@ -527,12 +566,14 @@ public sealed class Plugin : IDalamudPlugin
     {
         p3BlackHoleTracker.Refresh(isInDmu: false, suppressLiveForP4: false);
         p3LimitCutTracker.Reset();
+        p1Tracker.Reset();
         CaptureCurrentPullSnapshot(snapshotReason);
         currentEntries.Clear();
         currentMembers.Clear();
         currentAssignments.Clear();
         localAssignments.Clear();
         currentGazeAssignments.Clear();
+        currentPartyCallAssignments.Clear();
         currentBossTells.Clear();
         latestBossTells.Clear();
         capturedDebuffStates.Clear();
@@ -549,6 +590,7 @@ public sealed class Plugin : IDalamudPlugin
         return currentAssignments.Count > 0 ||
             localAssignments.Count > 0 ||
             currentGazeAssignments.Count > 0 ||
+            currentPartyCallAssignments.Count > 0 ||
             currentBossTells.Count > 0;
     }
 
@@ -558,9 +600,11 @@ public sealed class Plugin : IDalamudPlugin
             ? DmuHelperDisplayMode.P4Debuffs
             : !p4SeenThisPull && (p3BlackHoleTracker.HasLiveSignal || p3LimitCutTracker.HasLiveSignal)
                 ? DmuHelperDisplayMode.P3BlackHole
-                : Configuration.PreviewWhenInactive
-                    ? DmuHelperDisplayMode.Preview
-                    : DmuHelperDisplayMode.Empty;
+                : Configuration.ShowP1Calls && p1Tracker.HasLiveSignal
+                    ? DmuHelperDisplayMode.P1Calls
+                    : Configuration.PreviewWhenInactive
+                        ? DmuHelperDisplayMode.Preview
+                        : DmuHelperDisplayMode.Empty;
     }
 
     private void RefreshBossTellSnapshots()
@@ -583,6 +627,8 @@ public sealed class Plugin : IDalamudPlugin
             {
                 continue;
             }
+
+            LogBossTellChange(boss, battleChara);
 
             foreach (var status in battleChara.StatusList)
             {
@@ -686,16 +732,26 @@ public sealed class Plugin : IDalamudPlugin
 
     private void RefreshPartyGazeAssignments()
     {
-        currentGazeAssignments.Clear();
-        if (!WatchedStatuses.TryGetValue(CursedShriekStatusId, out var rule))
-        {
-            return;
-        }
+        RefreshPartyAssignments(currentGazeAssignments, statusId => statusId == CursedShriekStatusId);
+    }
 
-        foreach (var entry in currentEntries.Where(entry => entry.StatusId == CursedShriekStatusId))
+    private void RefreshPartyCallAssignments()
+    {
+        RefreshPartyAssignments(currentPartyCallAssignments, P4Calls.PartyStatusIds.Contains);
+    }
+
+    private void RefreshPartyAssignments(List<P4DebuffAssignment> target, Func<uint, bool> includeStatus)
+    {
+        target.Clear();
+        foreach (var entry in currentEntries.Where(entry => includeStatus(entry.StatusId)))
         {
+            if (!WatchedStatuses.TryGetValue(entry.StatusId, out var rule))
+            {
+                continue;
+            }
+
             var capturedState = GetOrUpdateCapturedDebuffState(entry, rule);
-            currentGazeAssignments.Add(new P4DebuffAssignment(
+            target.Add(new P4DebuffAssignment(
                 entry,
                 rule,
                 capturedState.Reality,
@@ -805,6 +861,7 @@ public sealed class Plugin : IDalamudPlugin
         {
             capturedState = CaptureDebuffState(rule);
             capturedDebuffStates[entry.Key] = capturedState;
+            LogCapturedDebuffState(entry, capturedState);
             return capturedState;
         }
 
@@ -815,7 +872,37 @@ public sealed class Plugin : IDalamudPlugin
 
         capturedState = new CapturedDebuffState(tell!.Reality, tell.Param, DateTime.UtcNow);
         capturedDebuffStates[entry.Key] = capturedState;
+        LogCapturedDebuffState(entry, capturedState);
         return capturedState;
+    }
+
+    private static void LogCapturedDebuffState(PartyStatusEntry entry, CapturedDebuffState capturedState)
+    {
+        Log.Information(
+            "[P4 capture] {Member} {Status}: {Reality} from tell param {Param} with {Remaining:0.0}s left.",
+            entry.MemberName,
+            entry.StatusName,
+            capturedState.Reality,
+            capturedState.TellParam?.ToString() ?? "none",
+            entry.RemainingTime);
+    }
+
+    // Logs every change to the boss's tell statuses, including when more than one is active at once.
+    private void LogBossTellChange(P4Boss boss, IBattleChara battleChara)
+    {
+        var tellParams = string.Join(", ", battleChara.StatusList
+            .Where(status => status.StatusId == BossTellStatusId)
+            .Select(status => status.Param));
+        if (lastLoggedTellParams.TryGetValue(boss, out var lastParams) && lastParams == tellParams)
+        {
+            return;
+        }
+
+        lastLoggedTellParams[boss] = tellParams;
+        Log.Information(
+            "[P4 tell] {Boss} tell params now [{Params}].",
+            boss,
+            tellParams.Length == 0 ? "none" : tellParams);
     }
 
     private CapturedDebuffState CaptureDebuffState(WatchedStatus rule)
@@ -1001,7 +1088,7 @@ public sealed class Plugin : IDalamudPlugin
         return WoundColor.None;
     }
 
-    private string GetStatusName(uint statusId)
+    internal string GetStatusName(uint statusId)
     {
         if (statusNameCache.TryGetValue(statusId, out var cachedName))
         {
@@ -1058,12 +1145,19 @@ public sealed class Plugin : IDalamudPlugin
 
         p3BlackHoleTracker.OnDutyReset();
         p3LimitCutTracker.Reset();
+        p1Tracker.Reset();
+        if (Configuration.DiscoveryLogging)
+        {
+            discoveryLog.Reset("Duty start/wipe/reset");
+        }
+
         CaptureCurrentPullSnapshot("Wipe/reset detected");
         currentEntries.Clear();
         currentMembers.Clear();
         currentAssignments.Clear();
         localAssignments.Clear();
         currentGazeAssignments.Clear();
+        currentPartyCallAssignments.Clear();
         currentBossTells.Clear();
         latestBossTells.Clear();
         capturedDebuffStates.Clear();
@@ -1107,6 +1201,7 @@ public sealed class Plugin : IDalamudPlugin
             currentPullBossTells.Count > 0 ||
             currentAssignments.Count > 0 ||
             currentGazeAssignments.Count > 0 ||
+            currentPartyCallAssignments.Count > 0 ||
             currentBossTells.Count > 0;
     }
 
@@ -1149,6 +1244,8 @@ public sealed class Plugin : IDalamudPlugin
     private void ResetPullState()
     {
         currentPullDebuffRecords.Clear();
+        CallSetHistory.Clear();
+        lastLoggedTellParams.Clear();
         currentPullBossTells.Clear();
         capturedFloodWounds.Clear();
         activeDebuffRecordIndexes.Clear();

@@ -93,6 +93,17 @@ public sealed class ConfigWindow : Window, IDisposable
         }
 
         ImGui.Separator();
+        ImGui.TextUnformatted("P1 Kefka");
+        var showP1Calls = configuration.ShowP1Calls;
+        if (ImGui.Checkbox("Show P1 calls", ref showP1Calls))
+        {
+            configuration.ShowP1Calls = showP1Calls;
+            plugin.SaveConfiguration();
+        }
+
+        ImGui.TextDisabled("Calls Kefka's rings (stack/spread, ice, lightning), the statue's look away/look at, rocks and cleaves.");
+
+        ImGui.Separator();
         ImGui.TextUnformatted("P3 Black Hole");
         DrawStrategySetting();
         ImGui.TextDisabled("Does not support double tethers, yet.");
@@ -100,11 +111,98 @@ public sealed class ConfigWindow : Window, IDisposable
         ImGui.Separator();
         ImGui.TextUnformatted("P4 Debuffs");
         ImGui.TextDisabled("P4 debuff detection is automatic. The helper only keeps the P4 debuffs it knows how to resolve.");
+        DrawP4Settings();
+
+        ImGui.Separator();
+        ImGui.TextUnformatted("Diagnostics");
+        var discoveryLogging = configuration.DiscoveryLogging;
+        if (ImGui.Checkbox("Discovery logging", ref discoveryLogging))
+        {
+            configuration.DiscoveryLogging = discoveryLogging;
+            plugin.SaveConfiguration();
+        }
+
+        ImGui.TextDisabled("Writes boss/NPC statuses, casts and actions, plus headmarkers, tethers and arena effects in DMU to /xllog as [DMU discovery].");
 
         ImGui.Separator();
         ImGui.TextWrapped("The helper only scans while you are in DMU.");
         ImGui.TextWrapped("P3 Black Hole appears while assignment data is detected, then disappears when that information is no longer active.");
         ImGui.TextWrapped("P4 debuffs appear automatically when known P4 debuffs or boss tell status 2056 are detected.");
+    }
+
+    private void DrawP4Settings()
+    {
+        var showActive = configuration.ShowP4Active;
+        if (ImGui.Checkbox("Show Active", ref showActive))
+        {
+            configuration.ShowP4Active = showActive;
+            plugin.SaveConfiguration();
+        }
+
+        ImGui.SameLine();
+        var showCalls = configuration.ShowP4Calls;
+        if (ImGui.Checkbox("Show Calls", ref showCalls))
+        {
+            configuration.ShowP4Calls = showCalls;
+            plugin.SaveConfiguration();
+        }
+
+        ImGui.SameLine();
+        var showGazes = configuration.ShowP4Gazes;
+        if (ImGui.Checkbox("Show Gazes", ref showGazes))
+        {
+            configuration.ShowP4Gazes = showGazes;
+            plugin.SaveConfiguration();
+        }
+
+        if (!configuration.ShowP4Calls)
+        {
+            ImGui.BeginDisabled();
+        }
+
+        var showStopOnly = configuration.CallsShowStopOnly;
+        if (ImGui.Checkbox("Calls: only show accel STOP players", ref showStopOnly))
+        {
+            configuration.CallsShowStopOnly = showStopOnly;
+            plugin.SaveConfiguration();
+        }
+
+        ImGui.SetNextItemWidth(180.0f);
+        var playerDisplayLabel = GetPlayerDisplayLabel(configuration.CallsPlayerDisplay);
+        if (ImGui.BeginCombo("Calls: show players as", playerDisplayLabel))
+        {
+            foreach (var display in Enum.GetValues<P4CallPlayerDisplay>())
+            {
+                var isSelected = display == configuration.CallsPlayerDisplay;
+                if (ImGui.Selectable(GetPlayerDisplayLabel(display), isSelected))
+                {
+                    configuration.CallsPlayerDisplay = display;
+                    plugin.SaveConfiguration();
+                }
+
+                if (isSelected)
+                {
+                    ImGui.SetItemDefaultFocus();
+                }
+            }
+
+            ImGui.EndCombo();
+        }
+
+        if (!configuration.ShowP4Calls)
+        {
+            ImGui.EndDisabled();
+        }
+    }
+
+    private static string GetPlayerDisplayLabel(P4CallPlayerDisplay display)
+    {
+        return display switch
+        {
+            P4CallPlayerDisplay.FirstName => "First name",
+            P4CallPlayerDisplay.JobIcon => "Job icon",
+            _ => "Full name",
+        };
     }
 
     private void DrawStrategySetting()

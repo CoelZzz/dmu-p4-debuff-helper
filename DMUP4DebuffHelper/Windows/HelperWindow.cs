@@ -24,6 +24,11 @@ public sealed class HelperWindow : Window, IDisposable
     private static readonly Vector4 BlueSideColor = new(0.35f, 0.72f, 1.0f, 1.0f);
     private static readonly Vector4 PurpleSideColor = new(0.82f, 0.55f, 1.0f, 1.0f);
     private static readonly Vector4 TimerTextColor = new(0.94f, 0.98f, 1.0f, 1.0f);
+    private static readonly Vector4 WaterCallColor = new(0.35f, 0.65f, 1.0f, 1.0f);
+    private static readonly Vector4 DonutCallColor = new(0.25f, 0.85f, 0.5f, 1.0f);
+    private static readonly Vector4 TwisterCallColor = new(1.0f, 0.6f, 0.25f, 1.0f);
+    private static readonly Vector4 StopCallColor = new(1.0f, 0.45f, 0.4f, 1.0f);
+    private static readonly Vector4 CallDividerColor = new(1.0f, 1.0f, 1.0f, 0.08f);
     private static readonly Vector4 PanelBorderColor = new(1.0f, 1.0f, 1.0f, 0.18f);
     private static readonly Vector4 PanelFillColor = new(0.02f, 0.025f, 0.03f, 0.32f);
     private static readonly Vector4 PreviewButtonColor = new(0.85f, 0.62f, 0.18f, 0.72f);
@@ -34,6 +39,9 @@ public sealed class HelperWindow : Window, IDisposable
     private const float AssignmentIconSize = 30.0f;
     private const float AccretionJobIconSize = 28.0f;
     private const float GazeDuplicateTimerToleranceSeconds = 2.0f;
+
+    // PLD, WAR, WHM, SCH, DRG, NIN, BRD, BLM by preview party slot.
+    private static readonly uint[] PreviewClassJobIds = [19, 21, 24, 28, 22, 30, 23, 25];
     private static readonly IReadOnlyList<P3PreviewRole> P3PreviewRoles =
     [
         new(P3.LineGroup.First, true, false, 41, "FIL DPS"),
@@ -70,7 +78,16 @@ public sealed class HelperWindow : Window, IDisposable
                 DrawP4View(
                     GetOrderedAssignments(plugin.CurrentAssignments),
                     GetOrderedAssignments(plugin.CurrentGazeAssignments),
+                    P4Calls.Build(
+                        plugin.CurrentPartyCallAssignments.Concat(plugin.CurrentGazeAssignments),
+                        plugin.CurrentAssignments,
+                        plugin.CallSetHistory,
+                        DateTime.UtcNow,
+                        plugin.Configuration.CallsShowStopOnly),
                     isPreview: false);
+                break;
+            case DmuHelperDisplayMode.P1Calls:
+                DrawP1View(plugin.P1.GetCalls(DateTime.UtcNow), isPreview: false);
                 break;
             case DmuHelperDisplayMode.P3BlackHole:
                 DrawP3View(
@@ -93,13 +110,57 @@ public sealed class HelperWindow : Window, IDisposable
         }
     }
 
+    private void DrawP1View(IReadOnlyList<CallBlock> calls, bool isPreview)
+    {
+        DrawHeader(isPreview ? "P1 Preview" : "P1 Calls", calls.Count, isPreview);
+        if (plugin.Configuration.HelperCollapsed)
+        {
+            return;
+        }
+
+        ImGui.Spacing();
+        DrawP1Content(calls);
+    }
+
+    private void DrawP1Content(IReadOnlyList<CallBlock> calls)
+    {
+        if (calls.Count == 0)
+        {
+            ImGui.TextDisabled("Waiting for the next P1 call.");
+            return;
+        }
+
+        ImGui.TextColored(GoldColor, "Calls");
+        DrawCallSetPanel(calls);
+    }
+
+    private static List<CallBlock> GetPreviewP1Calls()
+    {
+        // One of each P1 call (they never all show at once in a pull):
+        // stack/spread ring fake + lightning ring real with spread markers, a real statue gaze,
+        // supports tethered to the rock statue, and a cleave on the west half.
+        return
+        [
+            P1Tracker.BuildRingCall(
+                new HashSet<uint> { P1Tracker.StackSpreadFakeIcon, P1Tracker.LightningRealIcon },
+                P1Tracker.SpreadMarkerIcon,
+                4.2f),
+            P1Tracker.BuildCleaveCall(cleavesWest: true, 4.8f),
+            P1Tracker.BuildGazeCall(RealityState.Real, 8.6f),
+            P1Tracker.BuildRocksCall(
+                [new("Preview Player", true), new("Party Member 2", true), new("Party Member 3", true), new("Party Member 4", true)],
+                10.1f),
+        ];
+    }
+
     private void DrawP4View(
         IReadOnlyList<P4DebuffAssignment> assignments,
         IReadOnlyList<P4DebuffAssignment> gazeAssignments,
+        IReadOnlyList<P4Call> calls,
         bool isPreview)
     {
         var displayedGazes = GetRepresentativeGazeAssignments(gazeAssignments);
-        DrawHeader(isPreview ? "P4 Debuffs Preview" : "P4 Debuffs", assignments.Count + displayedGazes.Count, isPreview);
+        DrawHeader(isPreview ? "P4 Debuffs Preview" : "P4 Debuffs", GetVisibleP4Count(assignments.Count, displayedGazes.Count, calls.Count), isPreview);
         if (plugin.Configuration.HelperCollapsed)
         {
             return;
@@ -112,22 +173,58 @@ public sealed class HelperWindow : Window, IDisposable
             return;
         }
 
-        DrawP4Content(assignments, displayedGazes);
+        DrawP4Content(assignments, displayedGazes, calls);
     }
 
     private void DrawP4Content(
         IReadOnlyList<P4DebuffAssignment> assignments,
-        IReadOnlyList<GazeDisplayAssignment> gazeAssignments)
+        IReadOnlyList<GazeDisplayAssignment> gazeAssignments,
+        IReadOnlyList<P4Call> calls)
     {
-        if (assignments.Count == 0 && gazeAssignments.Count == 0)
+        var configuration = plugin.Configuration;
+        if (GetVisibleP4Count(assignments.Count, gazeAssignments.Count, calls.Count) == 0)
         {
-            ImGui.TextDisabled("Waiting for P4 debuffs.");
+            ImGui.TextDisabled(configuration.ShowP4Active || configuration.ShowP4Calls || configuration.ShowP4Gazes
+                ? "Waiting for P4 debuffs."
+                : "All P4 sections are hidden in settings.");
             return;
         }
 
-        DrawSection("Active", assignments, "Active");
-        ImGui.Spacing();
-        DrawGazeSection("Gazes", gazeAssignments, "Gazes");
+        var drewSection = false;
+        if (configuration.ShowP4Active)
+        {
+            DrawSection("Active", assignments, "Active");
+            drewSection = true;
+        }
+
+        if (configuration.ShowP4Calls && calls.Count > 0)
+        {
+            if (drewSection)
+            {
+                ImGui.Spacing();
+            }
+
+            DrawCallSection("Calls", calls);
+            drewSection = true;
+        }
+
+        if (configuration.ShowP4Gazes)
+        {
+            if (drewSection)
+            {
+                ImGui.Spacing();
+            }
+
+            DrawGazeSection("Gazes", gazeAssignments, "Gazes");
+        }
+    }
+
+    private int GetVisibleP4Count(int assignmentCount, int gazeCount, int callCount)
+    {
+        var configuration = plugin.Configuration;
+        return (configuration.ShowP4Active ? assignmentCount : 0)
+            + (configuration.ShowP4Gazes ? gazeCount : 0)
+            + (configuration.ShowP4Calls ? callCount : 0);
     }
 
     private void DrawP3View(
@@ -397,12 +494,16 @@ public sealed class HelperWindow : Window, IDisposable
 
     private void DrawPreviewView()
     {
-        if (selectedPreviewMode is not (DmuHelperDisplayMode.P3BlackHole or DmuHelperDisplayMode.P4Debuffs))
+        if (selectedPreviewMode is not (DmuHelperDisplayMode.P1Calls or DmuHelperDisplayMode.P3BlackHole or DmuHelperDisplayMode.P4Debuffs))
         {
             selectedPreviewMode = DmuHelperDisplayMode.P4Debuffs;
         }
 
-        if (selectedPreviewMode == DmuHelperDisplayMode.P3BlackHole)
+        if (selectedPreviewMode == DmuHelperDisplayMode.P1Calls)
+        {
+            DrawHeader("P1 Preview", GetPreviewP1Calls().Count, isPreview: true);
+        }
+        else if (selectedPreviewMode == DmuHelperDisplayMode.P3BlackHole)
         {
             DrawHeader("P3 Preview", P3.BlackHoleStrategy.GetInstructionsFor(CreateP3PreviewAssignment(), plugin.Configuration.SelectedBlackHoleStrategy).Count, isPreview: true);
         }
@@ -410,7 +511,8 @@ public sealed class HelperWindow : Window, IDisposable
         {
             var previewAssignments = GetPreviewAssignments();
             var previewGazes = GetRepresentativeGazeAssignments(GetPreviewGazeAssignments());
-            DrawHeader("P4 Debuffs Preview", previewAssignments.Count + previewGazes.Count, isPreview: true);
+            var previewCalls = GetPreviewCalls();
+            DrawHeader("P4 Debuffs Preview", GetVisibleP4Count(previewAssignments.Count, previewGazes.Count, previewCalls.Count), isPreview: true);
         }
 
         if (plugin.Configuration.HelperCollapsed)
@@ -422,6 +524,12 @@ public sealed class HelperWindow : Window, IDisposable
         DrawPreviewModeSelector();
         ImGui.Separator();
 
+        if (selectedPreviewMode == DmuHelperDisplayMode.P1Calls)
+        {
+            DrawP1Content(GetPreviewP1Calls());
+            return;
+        }
+
         if (selectedPreviewMode == DmuHelperDisplayMode.P3BlackHole)
         {
             DrawP3PreviewControls();
@@ -431,15 +539,18 @@ public sealed class HelperWindow : Window, IDisposable
         }
 
         var p4PreviewAssignments = GetPreviewAssignments();
-        DrawP4Content(p4PreviewAssignments, GetRepresentativeGazeAssignments(GetPreviewGazeAssignments()));
+        DrawP4Content(
+            p4PreviewAssignments,
+            GetRepresentativeGazeAssignments(GetPreviewGazeAssignments()),
+            GetPreviewCalls());
     }
 
     private void DrawPreviewModeSelector()
     {
-        var p4Selected = selectedPreviewMode == DmuHelperDisplayMode.P4Debuffs;
-        if (ImGui.RadioButton("P4", p4Selected))
+        var p1Selected = selectedPreviewMode == DmuHelperDisplayMode.P1Calls;
+        if (ImGui.RadioButton("P1", p1Selected))
         {
-            selectedPreviewMode = DmuHelperDisplayMode.P4Debuffs;
+            selectedPreviewMode = DmuHelperDisplayMode.P1Calls;
         }
 
         ImGui.SameLine();
@@ -447,6 +558,13 @@ public sealed class HelperWindow : Window, IDisposable
         if (ImGui.RadioButton("P3", p3Selected))
         {
             selectedPreviewMode = DmuHelperDisplayMode.P3BlackHole;
+        }
+
+        ImGui.SameLine();
+        var p4Selected = selectedPreviewMode == DmuHelperDisplayMode.P4Debuffs;
+        if (ImGui.RadioButton("P4", p4Selected))
+        {
+            selectedPreviewMode = DmuHelperDisplayMode.P4Debuffs;
         }
     }
 
@@ -664,9 +782,9 @@ public sealed class HelperWindow : Window, IDisposable
             (P4Flood.WhiteWound2StatusId, RealityState.Unknown, 0, 6.8f, "Preview Player", 0, WoundColor.White),
             (P4Flood.AllaganFieldStatusId, RealityState.Real, 1122, 7.4f, "Preview Player", 0, WoundColor.White),
             (5545, RealityState.Real, 1120, 10.4f, "Preview Player", 0, WoundColor.None),
-            (5544, RealityState.Fake, 1119, 12.0f, "Preview Player", 0, WoundColor.None),
-            (5548, RealityState.Real, 1122, 18.0f, "Preview Player", 0, WoundColor.None),
-            (5547, RealityState.Fake, 1121, 23.2f, "Preview Player", 0, WoundColor.None),
+            (5546, RealityState.Fake, 1119, 20.4f, "Preview Player", 0, WoundColor.None),
+            (5548, RealityState.Real, 1122, 23.2f, "Preview Player", 0, WoundColor.None),
+            (5547, RealityState.Real, 1122, 18.0f, "Preview Player", 0, WoundColor.None),
         };
 
         return BuildPreviewAssignments(previews);
@@ -685,6 +803,47 @@ public sealed class HelperWindow : Window, IDisposable
         var gazes = BuildPreviewAssignments(previews);
         StableSortByTimerWithTolerance(gazes);
         return gazes;
+    }
+
+    private List<P4Call> GetPreviewCalls()
+    {
+        return P4Calls.Build(
+            GetPreviewPartyCallAssignments().Concat(GetPreviewGazeAssignments()),
+            GetPreviewAssignments(),
+            new P4CallSetHistory(),
+            DateTime.UtcNow,
+            plugin.Configuration.CallsShowStopOnly);
+    }
+
+    private List<P4DebuffAssignment> GetPreviewPartyCallAssignments()
+    {
+        var previews = new List<(uint StatusId, RealityState Reality, ushort TellParam, float Time, string MemberName, int PartyIndex, WoundColor WoundColor)>
+        {
+            // 1st set: water stacks, lightning spreads, no accel.
+            (5545, RealityState.Real, 1120, 10.4f, "Preview Player", 0, WoundColor.None),
+            (5545, RealityState.Real, 1120, 10.5f, "Party Member 2", 1, WoundColor.None),
+            (5544, RealityState.Real, 1120, 10.4f, "Party Member 3", 2, WoundColor.None),
+            (5544, RealityState.Real, 1120, 10.6f, "Party Member 4", 3, WoundColor.None),
+
+            // 2nd set: water spreads, lightning stacks, and accels from two batches resolve differently.
+            (5545, RealityState.Fake, 1119, 20.4f, "Party Member 5", 4, WoundColor.None),
+            (5545, RealityState.Fake, 1119, 20.5f, "Party Member 6", 5, WoundColor.None),
+            (5544, RealityState.Fake, 1119, 20.4f, "Party Member 7", 6, WoundColor.None),
+            (5544, RealityState.Fake, 1119, 20.6f, "Party Member 8", 7, WoundColor.None),
+            (5546, RealityState.Fake, 1119, 20.4f, "Preview Player", 0, WoundColor.None),
+            (5546, RealityState.Fake, 1119, 20.5f, "Party Member 3", 2, WoundColor.None),
+            (5546, RealityState.Real, 1120, 20.4f, "Party Member 6", 5, WoundColor.None),
+            (5546, RealityState.Real, 1120, 20.6f, "Party Member 8", 7, WoundColor.None),
+        };
+
+        for (var partyIndex = 0; partyIndex < 8; partyIndex++)
+        {
+            var memberName = partyIndex == 0 ? "Preview Player" : $"Party Member {partyIndex + 1}";
+            previews.Add((5548, RealityState.Real, 1122, 23.2f + partyIndex * 0.1f, memberName, partyIndex, WoundColor.None));
+            previews.Add((5547, RealityState.Real, 1122, 18.0f + partyIndex * 0.1f, memberName, partyIndex, WoundColor.None));
+        }
+
+        return BuildPreviewAssignments(previews);
     }
 
     private List<P4DebuffAssignment> BuildPreviewAssignments(
@@ -709,7 +868,8 @@ public sealed class HelperWindow : Window, IDisposable
                 preview.Time,
                 true,
                 rule.SortOrder,
-                DateTime.UtcNow);
+                DateTime.UtcNow,
+                PreviewClassJobIds[preview.PartyIndex % PreviewClassJobIds.Length]);
 
             var floodSide = P4Flood.ResolveSide(rule.Id, preview.WoundColor, preview.Reality);
             assignments.Add(new P4DebuffAssignment(
@@ -844,6 +1004,186 @@ public sealed class HelperWindow : Window, IDisposable
         ImGui.SetCursorScreenPos(panelStart + new Vector2(HelperPadding, HelperPadding));
         DrawGazeRows(assignments, availableWidth - HelperPadding * 2.0f, idSuffix);
         ImGui.SetCursorScreenPos(panelStart + new Vector2(0.0f, panelHeight + ImGui.GetStyle().ItemSpacing.Y));
+    }
+
+    private void DrawCallSection(string label, IReadOnlyList<P4Call> calls)
+    {
+        ImGui.TextColored(GoldColor, label);
+        foreach (var set in calls.GroupBy(call => call.SetNumber))
+        {
+            DrawCallSetPanel(set.Select(call => new CallBlock(call.RemainingTime, call.Lines, call.Tooltip)).ToList());
+        }
+    }
+
+    private void DrawCallSetPanel(IReadOnlyList<CallBlock> calls)
+    {
+        var style = ImGui.GetStyle();
+        var mechanicGap = MathF.Round(ImGui.GetTextLineHeight() * 0.75f);
+        var panelStart = ImGui.GetCursorScreenPos();
+        var availableWidth = MathF.Max(160.0f, ImGui.GetContentRegionAvail().X);
+        var lineCount = calls.Sum(call => call.Lines.Count);
+        var panelHeight = HelperPadding * 2.0f
+            + lineCount * ImGui.GetTextLineHeight()
+            + MathF.Max(0, lineCount - calls.Count) * style.ItemSpacing.Y
+            + MathF.Max(0, calls.Count - 1) * mechanicGap;
+        ImGui.GetWindowDrawList().AddRectFilled(
+            panelStart,
+            panelStart + new Vector2(availableWidth, panelHeight),
+            ImGui.GetColorU32(PanelFillColor),
+            6.0f);
+        ImGui.GetWindowDrawList().AddRect(
+            panelStart,
+            panelStart + new Vector2(availableWidth, panelHeight),
+            ImGui.GetColorU32(PanelBorderColor),
+            6.0f);
+
+        var contentLeft = panelStart.X + HelperPadding;
+        var contentRight = panelStart.X + availableWidth - HelperPadding;
+        var cursorY = panelStart.Y + HelperPadding;
+        for (var callIndex = 0; callIndex < calls.Count; callIndex++)
+        {
+            var call = calls[callIndex];
+            if (callIndex > 0)
+            {
+                var dividerY = MathF.Round(cursorY + mechanicGap * 0.5f);
+                ImGui.GetWindowDrawList().AddLine(
+                    new Vector2(contentLeft, dividerY),
+                    new Vector2(contentRight, dividerY),
+                    ImGui.GetColorU32(CallDividerColor));
+                cursorY += mechanicGap;
+            }
+
+            for (var lineIndex = 0; lineIndex < call.Lines.Count; lineIndex++)
+            {
+                ImGui.SetCursorScreenPos(new Vector2(contentLeft, cursorY));
+                ImGui.BeginGroup();
+                DrawCallLine(call.Lines[lineIndex]);
+                ImGui.EndGroup();
+                if (ImGui.IsItemHovered())
+                {
+                    ImGui.SetTooltip(call.Tooltip);
+                }
+
+                if (lineIndex == 0)
+                {
+                    var timerText = FormatRemainingTime(call.RemainingTime);
+                    ImGui.SetCursorScreenPos(new Vector2(contentRight - ImGui.CalcTextSize(timerText).X, cursorY));
+                    ImGui.TextColored(TimerTextColor, timerText);
+                }
+
+                cursorY += ImGui.GetTextLineHeight();
+                if (lineIndex < call.Lines.Count - 1)
+                {
+                    cursorY += style.ItemSpacing.Y;
+                }
+            }
+        }
+
+        ImGui.SetCursorScreenPos(panelStart + new Vector2(0.0f, panelHeight + style.ItemSpacing.Y));
+    }
+
+    private void DrawCallLine(P4CallLine line)
+    {
+        var spacing = ImGui.GetStyle().ItemSpacing.X * 0.5f;
+        for (var index = 0; index < line.Segments.Count; index++)
+        {
+            var segment = line.Segments[index];
+            if (index > 0)
+            {
+                ImGui.SameLine(0.0f, spacing);
+            }
+
+            if (segment.StatusId != 0 && DrawInlineStatusIcon(segment.StatusId))
+            {
+                ImGui.SameLine(0.0f, spacing);
+            }
+
+            if (segment.Players is not null)
+            {
+                DrawCallPlayers(segment.Players);
+            }
+            else if (segment.Tone == P4CallTone.Muted)
+            {
+                ImGui.TextDisabled(segment.Text);
+            }
+            else
+            {
+                ImGui.TextColored(GetCallToneColor(segment.Tone), segment.Text);
+            }
+        }
+    }
+
+    private void DrawCallPlayers(IReadOnlyList<P4CallPlayer> players)
+    {
+        var display = plugin.Configuration.CallsPlayerDisplay;
+        if (display != P4CallPlayerDisplay.JobIcon)
+        {
+            var names = players.Select(player => display == P4CallPlayerDisplay.FirstName ? GetFirstName(player.Name) : player.Name);
+            ImGui.TextColored(TimerTextColor, string.Join(", ", names));
+            return;
+        }
+
+        var iconSize = ImGui.GetTextLineHeight();
+        for (var index = 0; index < players.Count; index++)
+        {
+            if (index > 0)
+            {
+                ImGui.SameLine(0.0f, ImGui.GetStyle().ItemSpacing.X * 0.35f);
+            }
+
+            DrawClassJobIcon(players[index].ClassJobId, iconSize, players[index].Name);
+        }
+    }
+
+    private static string GetFirstName(string name)
+    {
+        var spaceIndex = name.IndexOf(' ');
+        return spaceIndex > 0 ? name[..spaceIndex] : name;
+    }
+
+    private bool DrawInlineStatusIcon(uint statusId)
+    {
+        var iconId = plugin.GetStatusIconId(statusId);
+        if (iconId == 0)
+        {
+            return false;
+        }
+
+        var wrap = Plugin.TextureProvider.GetFromGameIcon(new GameIconLookup(iconId)).GetWrapOrDefault();
+        if (wrap is null)
+        {
+            return false;
+        }
+
+        var height = ImGui.GetTextLineHeight();
+        var width = wrap.Height > 0 ? height * wrap.Width / wrap.Height : height;
+        ImGui.Image(wrap.Handle, new Vector2(width, height));
+        return true;
+    }
+
+    private static Vector4 GetCallToneColor(P4CallTone tone)
+    {
+        return tone switch
+        {
+            P4CallTone.Water => WaterCallColor,
+            P4CallTone.Lightning => GoldColor,
+            P4CallTone.LookAway => PurpleSideColor,
+            P4CallTone.LookAt => GoldColor,
+            P4CallTone.Donut => DonutCallColor,
+            P4CallTone.Twister => TwisterCallColor,
+            P4CallTone.Stop => StopCallColor,
+            P4CallTone.Stack => RealColor,
+            P4CallTone.Spread => PurpleSideColor,
+            P4CallTone.In => DonutCallColor,
+            P4CallTone.Out => StopCallColor,
+            P4CallTone.Ice => WaterCallColor,
+            P4CallTone.Rocks => TwisterCallColor,
+            P4CallTone.Direction => GoldColor,
+            P4CallTone.FloodBlue => BlueSideColor,
+            P4CallTone.FloodPurple => PurpleSideColor,
+            P4CallTone.Motion => RealColor,
+            _ => TimerTextColor,
+        };
     }
 
     private static float GetGazePanelHeight(int assignmentCount)

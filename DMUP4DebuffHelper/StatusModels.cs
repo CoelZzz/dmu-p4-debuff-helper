@@ -7,6 +7,7 @@ public enum DmuHelperDisplayMode
 {
     Empty,
     Preview,
+    P1Calls,
     P3BlackHole,
     P4Debuffs,
 }
@@ -256,7 +257,8 @@ public sealed record PartyStatusEntry(
     float RemainingTime,
     bool IsWatched,
     int SortOrder,
-    DateTime SeenAtUtc);
+    DateTime SeenAtUtc,
+    uint ClassJobId = 0);
 
 public sealed record P4DebuffAssignment(
     PartyStatusEntry Entry,

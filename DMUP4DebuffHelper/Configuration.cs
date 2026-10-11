@@ -26,6 +26,20 @@ public sealed class Configuration : IPluginConfiguration
 
     public float HelperBackgroundOpacity { get; set; } = 1.0f;
 
+    public bool ShowP1Calls { get; set; } = true;
+
+    public bool ShowP4Active { get; set; } = true;
+
+    public bool ShowP4Calls { get; set; } = true;
+
+    public bool ShowP4Gazes { get; set; } = true;
+
+    public bool CallsShowStopOnly { get; set; }
+
+    public P4CallPlayerDisplay CallsPlayerDisplay { get; set; } = P4CallPlayerDisplay.FullName;
+
+    public bool DiscoveryLogging { get; set; }
+
     public void Save()
     {
         Plugin.PluginInterface.SavePluginConfig(this);
