@@ -28,6 +28,11 @@ public sealed class Configuration : IPluginConfiguration
 
     public bool ShowP1Calls { get; set; } = true;
 
+    public bool ShowP2Calls { get; set; } = true;
+
+    // Character name of the P2 Forsaken buddy (MT/H1, OT/H2, M1/R1, M2/R2).
+    public string P2BuddyName { get; set; } = string.Empty;
+
     public bool ShowP4Active { get; set; } = true;
 
     public bool ShowP4Calls { get; set; } = true;

@@ -89,6 +89,9 @@ public sealed class HelperWindow : Window, IDisposable
             case DmuHelperDisplayMode.P1Calls:
                 DrawP1View(plugin.P1.GetCalls(DateTime.UtcNow), isPreview: false);
                 break;
+            case DmuHelperDisplayMode.P2Calls:
+                DrawP2View(plugin.P2.GetCalls(DateTime.UtcNow), isPreview: false);
+                break;
             case DmuHelperDisplayMode.P3BlackHole:
                 DrawP3View(
                     plugin.P3BlackHole.LocalAssignment,
@@ -124,14 +127,42 @@ public sealed class HelperWindow : Window, IDisposable
 
     private void DrawP1Content(IReadOnlyList<CallBlock> calls)
     {
+        DrawPhaseCalls(calls, "Waiting for the next P1 call.");
+    }
+
+    private void DrawP2View(IReadOnlyList<CallBlock> calls, bool isPreview)
+    {
+        DrawHeader(isPreview ? "P2 Preview" : "P2 Forsaken", calls.Count, isPreview);
+        if (plugin.Configuration.HelperCollapsed)
+        {
+            return;
+        }
+
+        ImGui.Spacing();
+        DrawPhaseCalls(calls, "Waiting for Forsaken.");
+    }
+
+    private void DrawPhaseCalls(IReadOnlyList<CallBlock> calls, string waitingText)
+    {
         if (calls.Count == 0)
         {
-            ImGui.TextDisabled("Waiting for the next P1 call.");
+            ImGui.TextDisabled(waitingText);
             return;
         }
 
         ImGui.TextColored(GoldColor, "Calls");
         DrawCallSetPanel(calls);
+    }
+
+    private static List<CallBlock> GetPreviewP2Calls()
+    {
+        // Other group (soaks sets 4-7) during tower set 2, holding a cone, with a circle buddy, while Kefka casts Past's End.
+        return
+        [
+            P2Tracker.BuildSetCall(2, ForsakenMarker.Cone, soaksFirst: false, 6.3f),
+            P2Tracker.BuildBuddyCall("Party Member 2", ForsakenMarker.Circle, ForsakenMarker.Cone, soaking: false, 6.3f),
+            P2Tracker.BuildEndsCall(isPast: true, 4.1f),
+        ];
     }
 
     private static List<CallBlock> GetPreviewP1Calls()
@@ -494,7 +525,7 @@ public sealed class HelperWindow : Window, IDisposable
 
     private void DrawPreviewView()
     {
-        if (selectedPreviewMode is not (DmuHelperDisplayMode.P1Calls or DmuHelperDisplayMode.P3BlackHole or DmuHelperDisplayMode.P4Debuffs))
+        if (selectedPreviewMode is not (DmuHelperDisplayMode.P1Calls or DmuHelperDisplayMode.P2Calls or DmuHelperDisplayMode.P3BlackHole or DmuHelperDisplayMode.P4Debuffs))
         {
             selectedPreviewMode = DmuHelperDisplayMode.P4Debuffs;
         }
@@ -502,6 +533,10 @@ public sealed class HelperWindow : Window, IDisposable
         if (selectedPreviewMode == DmuHelperDisplayMode.P1Calls)
         {
             DrawHeader("P1 Preview", GetPreviewP1Calls().Count, isPreview: true);
+        }
+        else if (selectedPreviewMode == DmuHelperDisplayMode.P2Calls)
+        {
+            DrawHeader("P2 Preview", GetPreviewP2Calls().Count, isPreview: true);
         }
         else if (selectedPreviewMode == DmuHelperDisplayMode.P3BlackHole)
         {
@@ -530,6 +565,12 @@ public sealed class HelperWindow : Window, IDisposable
             return;
         }
 
+        if (selectedPreviewMode == DmuHelperDisplayMode.P2Calls)
+        {
+            DrawPhaseCalls(GetPreviewP2Calls(), "Waiting for Forsaken.");
+            return;
+        }
+
         if (selectedPreviewMode == DmuHelperDisplayMode.P3BlackHole)
         {
             DrawP3PreviewControls();
@@ -551,6 +592,13 @@ public sealed class HelperWindow : Window, IDisposable
         if (ImGui.RadioButton("P1", p1Selected))
         {
             selectedPreviewMode = DmuHelperDisplayMode.P1Calls;
+        }
+
+        ImGui.SameLine();
+        var p2Selected = selectedPreviewMode == DmuHelperDisplayMode.P2Calls;
+        if (ImGui.RadioButton("P2", p2Selected))
+        {
+            selectedPreviewMode = DmuHelperDisplayMode.P2Calls;
         }
 
         ImGui.SameLine();
@@ -1181,6 +1229,8 @@ public sealed class HelperWindow : Window, IDisposable
             P4CallTone.Direction => GoldColor,
             P4CallTone.FloodBlue => BlueSideColor,
             P4CallTone.FloodPurple => PurpleSideColor,
+            P4CallTone.Circle => PurpleSideColor,
+            P4CallTone.Cone => TwisterCallColor,
             P4CallTone.Motion => RealColor,
             _ => TimerTextColor,
         };

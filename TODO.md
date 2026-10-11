@@ -40,10 +40,13 @@
 - [x] P1 Calls: Kefka's rings (stack/spread, ice, lightning), statue look away/look at, Support/DPS rocks, and East/West cleaves. Confirmed correct on live pulls.
 - [x] Discovery logging (settings > Diagnostics) for mapping new mechanics: statuses, casts, NPC actions with targets, headmarkers, tethers, object animations and arena effects, with NPC positions and per-pull timers.
 - [x] Verified the boss tell param mapping and every P4 real/fake call against BossMod replays (Sept 15 - Oct 3, 2026): no mismatches.
+- [x] P4 Calls: personal GO BLUE / GO PURPLE Flood line.
+- [x] P2 Forsaken calls: tower set count, "N BAIT - M CONE" style soak/bait call, buddy marker with SAME TOWER / SPLIT TOWERS, and PAST - BETWEEN / FUTURE - ACROSS. Buddy is picked in settings.
 
 ## Next Work
 
-- [ ] P2 calls: map mechanics with discovery logging and BossMod replays.
+- [ ] Live-test the P2 Forsaken calls.
+- [ ] Other P2 mechanics beyond Forsaken, if they need calls.
 - [ ] P3 calls beyond Black Hole: same approach as P2.
 - [ ] Mana Charge / Mana Release real/fake (on hold).
 - [ ] Decide whether P1's early statue mechanic (Pulse Wave `47785` / Wave Cannon `47784`, about 75s in) needs a call.
@@ -66,4 +69,7 @@ Decoded from discovery logs and BossMod replays; IDs were stable across instance
 - P4 boss tells (status `2056`): Neo Exdeath `1121` fake / `1122` real; Chaos `1119` fake / `1120` real. A debuff's reality is the tell up when it is applied (Neo Exdeath's Grand Cross `47892` applies Water, Lightning, Shriek and Accel; Chaos's cast applies Entropy and Dynamic Fluid).
 - P4 resolutions, even = real / odd = fake: Death Shriek `47894`/`47895`, Death Bolt `47896`/`47897`, Death Wave `47898`/`47899`, Death Surge `47900`/`47901`, Stray Flames `47906`/`47907`, Stray Spray `47908`/`47909`. Acceleration Bomb only fires Death Bomb `47893` when a player fails it; real bombs need roughly a second of standing still.
 - P4 accel sets: a set's four bombs can be all STOP, all MOTION, or 2/2 (10 of 28 replayed sets were split).
+- P2 Forsaken (Kefka `47804`): player headmarkers `715` stack (status `5084`, Spelldriver `47808`), `716` circle/defam (`5085`, Spellscatter `47809`), `717` cone (`5086`, Spellwave `47810`); status `5083` counts down soaks remaining.
+- P2 towers: arena effects 1-8, two per set (set n uses spots n and n-2), shown with state 1; they resolve as the Path of Light `47806` 10.0-10.3s later. Buddy pairs holding a stack at the start soak sets 1-3 and 8, the others 4-7 (59 of 59 replayed sequences).
+- P2 Future's End `47826` (ACROSS) / Past's End `47827` (BETWEEN): Kefka casts one during each even tower set. Odd sets have All Things Ending `47836`/`47837` cone baits.
 - P4 Flood: the floods give a second Wound (`5541` White / `5542` Black) for the colour a player stood in. Beyond Death `1382` appears in the later Flood, where players already hold second-type Wounds.

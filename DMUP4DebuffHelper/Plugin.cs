@@ -83,6 +83,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly GameEventHooks gameEventHooks;
     private readonly DiscoveryLog discoveryLog;
     private readonly P1Tracker p1Tracker;
+    private readonly P2Tracker p2Tracker;
     private readonly List<PartyStatusEntry> currentEntries = [];
     private readonly List<PartyMemberSnapshot> currentMembers = [];
     private readonly List<P4DebuffAssignment> currentAssignments = [];
@@ -137,6 +138,8 @@ public sealed class Plugin : IDalamudPlugin
 
     public P1Tracker P1 => p1Tracker;
 
+    public P2Tracker P2 => p2Tracker;
+
     public P4CallSetHistory CallSetHistory { get; } = new();
 
     public DmuHelperDisplayMode DisplayMode { get; private set; } = DmuHelperDisplayMode.Empty;
@@ -161,6 +164,7 @@ public sealed class Plugin : IDalamudPlugin
         gameEventHooks = new GameEventHooks();
         discoveryLog = new DiscoveryLog(this, gameEventHooks);
         p1Tracker = new P1Tracker(this, gameEventHooks);
+        p2Tracker = new P2Tracker(this, gameEventHooks);
         configWindow = new ConfigWindow(this);
         helperWindow = new HelperWindow(this)
         {
@@ -209,6 +213,7 @@ public sealed class Plugin : IDalamudPlugin
         RemoveCommands();
         actionEffectHook?.Dispose();
         p1Tracker.Dispose();
+        p2Tracker.Dispose();
         discoveryLog.Dispose();
         gameEventHooks.Dispose();
 
@@ -362,6 +367,11 @@ public sealed class Plugin : IDalamudPlugin
     {
         FlushQueuedPartyChatMessages(DateTime.UtcNow);
         RefreshStatusSnapshot();
+        if (IsInDmu)
+        {
+            p2Tracker.Update();
+        }
+
         if (IsInDmu && Configuration.DiscoveryLogging)
         {
             discoveryLog.Update();
@@ -567,6 +577,7 @@ public sealed class Plugin : IDalamudPlugin
         p3BlackHoleTracker.Refresh(isInDmu: false, suppressLiveForP4: false);
         p3LimitCutTracker.Reset();
         p1Tracker.Reset();
+        p2Tracker.Reset();
         CaptureCurrentPullSnapshot(snapshotReason);
         currentEntries.Clear();
         currentMembers.Clear();
@@ -600,11 +611,13 @@ public sealed class Plugin : IDalamudPlugin
             ? DmuHelperDisplayMode.P4Debuffs
             : !p4SeenThisPull && (p3BlackHoleTracker.HasLiveSignal || p3LimitCutTracker.HasLiveSignal)
                 ? DmuHelperDisplayMode.P3BlackHole
-                : Configuration.ShowP1Calls && p1Tracker.HasLiveSignal
-                    ? DmuHelperDisplayMode.P1Calls
-                    : Configuration.PreviewWhenInactive
-                        ? DmuHelperDisplayMode.Preview
-                        : DmuHelperDisplayMode.Empty;
+                : Configuration.ShowP2Calls && p2Tracker.HasLiveSignal
+                    ? DmuHelperDisplayMode.P2Calls
+                    : Configuration.ShowP1Calls && p1Tracker.HasLiveSignal
+                        ? DmuHelperDisplayMode.P1Calls
+                        : Configuration.PreviewWhenInactive
+                            ? DmuHelperDisplayMode.Preview
+                            : DmuHelperDisplayMode.Empty;
     }
 
     private void RefreshBossTellSnapshots()
@@ -1146,6 +1159,7 @@ public sealed class Plugin : IDalamudPlugin
         p3BlackHoleTracker.OnDutyReset();
         p3LimitCutTracker.Reset();
         p1Tracker.Reset();
+        p2Tracker.Reset();
         if (Configuration.DiscoveryLogging)
         {
             discoveryLog.Reset("Duty start/wipe/reset");

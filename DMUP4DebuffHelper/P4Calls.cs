@@ -34,6 +34,8 @@ public enum P4CallTone
     Direction,
     FloodBlue,
     FloodPurple,
+    Circle,
+    Cone,
 }
 
 public enum P4CallPlayerDisplay

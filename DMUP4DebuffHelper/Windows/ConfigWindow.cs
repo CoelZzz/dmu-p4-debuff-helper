@@ -104,6 +104,18 @@ public sealed class ConfigWindow : Window, IDisposable
         ImGui.TextDisabled("Calls Kefka's rings (stack/spread, ice, lightning), the statue's look away/look at, rocks and cleaves.");
 
         ImGui.Separator();
+        ImGui.TextUnformatted("P2 Forsaken");
+        var showP2Calls = configuration.ShowP2Calls;
+        if (ImGui.Checkbox("Show P2 calls", ref showP2Calls))
+        {
+            configuration.ShowP2Calls = showP2Calls;
+            plugin.SaveConfiguration();
+        }
+
+        DrawP2BuddySetting();
+        ImGui.TextDisabled("Buddies: MT/H1, OT/H2, M1/R1, M2/R2. Used for your soak group and the buddy's marker.");
+
+        ImGui.Separator();
         ImGui.TextUnformatted("P3 Black Hole");
         DrawStrategySetting();
         ImGui.TextDisabled("Does not support double tethers, yet.");
@@ -193,6 +205,51 @@ public sealed class ConfigWindow : Window, IDisposable
         {
             ImGui.EndDisabled();
         }
+    }
+
+    private void DrawP2BuddySetting()
+    {
+        // Offer the current party, plus the saved buddy if they are not in the party right now.
+        var names = Plugin.PartyList
+            .Select(member => member.Name.TextValue)
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .ToList();
+        var localName = Plugin.ObjectTable.LocalPlayer?.Name.TextValue;
+        names.RemoveAll(name => string.Equals(name, localName, StringComparison.OrdinalIgnoreCase));
+        if (!string.IsNullOrWhiteSpace(configuration.P2BuddyName) && !names.Contains(configuration.P2BuddyName))
+        {
+            names.Insert(0, configuration.P2BuddyName);
+        }
+
+        ImGui.SetNextItemWidth(180.0f);
+        var preview = string.IsNullOrWhiteSpace(configuration.P2BuddyName) ? "(none)" : configuration.P2BuddyName;
+        if (!ImGui.BeginCombo("P2 buddy", preview))
+        {
+            return;
+        }
+
+        if (ImGui.Selectable("(none)", string.IsNullOrWhiteSpace(configuration.P2BuddyName)))
+        {
+            configuration.P2BuddyName = string.Empty;
+            plugin.SaveConfiguration();
+        }
+
+        foreach (var name in names)
+        {
+            var isSelected = string.Equals(name, configuration.P2BuddyName, StringComparison.OrdinalIgnoreCase);
+            if (ImGui.Selectable(name, isSelected))
+            {
+                configuration.P2BuddyName = name;
+                plugin.SaveConfiguration();
+            }
+
+            if (isSelected)
+            {
+                ImGui.SetItemDefaultFocus();
+            }
+        }
+
+        ImGui.EndCombo();
     }
 
     private static string GetPlayerDisplayLabel(P4CallPlayerDisplay display)

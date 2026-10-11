@@ -8,6 +8,7 @@ public enum DmuHelperDisplayMode
     Empty,
     Preview,
     P1Calls,
+    P2Calls,
     P3BlackHole,
     P4Debuffs,
 }
