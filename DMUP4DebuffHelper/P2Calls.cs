@@ -44,6 +44,7 @@ public sealed class P2Tracker : IDisposable
     private DateTime? lastEventAtUtc;
     private DateTime? lastTowerSetAtUtc;
     private int towerSet;
+    private bool groupUnknown;
     private uint endsActionId;
     private float endsRemaining;
 
@@ -56,6 +57,9 @@ public sealed class P2Tracker : IDisposable
     }
 
     public bool HasLiveSignal => lastEventAtUtc is { } lastEvent && DateTime.UtcNow - lastEvent <= SequenceTimeout;
+
+    // True while Forsaken is running and the soak group can't be worked out without a buddy.
+    public bool GroupUnknown => HasLiveSignal && groupUnknown;
 
     public void Dispose()
     {
@@ -111,16 +115,23 @@ public sealed class P2Tracker : IDisposable
             ? MathF.Max(0.0f, (float)(towerSeenAt + TowerSoakDelay - now).TotalSeconds)
             : 0.0f;
 
+        var rangedNoFlex = plugin.Configuration.P2RangedNoFlex;
         markers.TryGetValue(localId, out var myMarker);
         var buddyMarker = buddy is not null && markers.TryGetValue(buddy.EntityId, out var known) ? known : ForsakenMarker.None;
-        var soaksFirst = IsStackGroup(localId, buddy?.EntityId);
-        calls.Add(BuildSetCall(set, myMarker, soaksFirst, remaining));
+        var soaksFirst = IsStackGroup(localId, buddy?.EntityId, rangedNoFlex);
+        groupUnknown = soaksFirst is null;
 
-        if (buddy is not null)
+        // The buddy line stays first: their marker matters for the whole phase, not just this set.
+        if (buddy is not null && !rangedNoFlex)
         {
             var soaking = soaksFirst is { } stackGroup && GetSoakSets(stackGroup).Contains(set);
-            calls.Add(BuildBuddyCall(buddy.Name.TextValue, buddyMarker, myMarker, soaking, remaining));
+            calls.Add(BuildBuddyCall(buddy.Name.TextValue, buddyMarker, myMarker, soaking));
         }
+
+        var unknownHint = rangedNoFlex
+            ? "One melee has the stack: pick your buddy"
+            : "Pick your P2 buddy";
+        calls.Add(BuildSetCall(set, myMarker, soaksFirst, remaining, unknownHint));
 
         if (endsActionId != 0)
         {
@@ -130,14 +141,14 @@ public sealed class P2Tracker : IDisposable
         return calls;
     }
 
-    // soaksFirst: true = stack group (sets 1, 2, 3, 8), false = other group (sets 4-7), null = buddy not chosen yet.
-    public static CallBlock BuildSetCall(int set, ForsakenMarker marker, bool? soaksFirst, float remainingTime)
+    // soaksFirst: true = stack group (sets 1, 2, 3, 8), false = other group (sets 4-7), null = group not known yet.
+    public static CallBlock BuildSetCall(int set, ForsakenMarker marker, bool? soaksFirst, float remainingTime, string unknownHint = "Pick your P2 buddy")
     {
         if (soaksFirst is not { } stackGroup)
         {
             return new CallBlock(
                 remainingTime,
-                [new P4CallLine([new($"{set}"), FormatMarker(marker)]), new P4CallLine([new("Pick your P2 buddy in /dmu settings", P4CallTone.Muted)])],
+                [new P4CallLine([new($"{set}"), FormatMarker(marker)]), new P4CallLine([new(unknownHint, P4CallTone.Muted)])],
                 "Your soak group depends on whether you or your buddy started with the stack.");
         }
 
@@ -161,7 +172,8 @@ public sealed class P2Tracker : IDisposable
         return new CallBlock(remainingTime, [new P4CallLine(segments)], tooltip);
     }
 
-    public static CallBlock BuildBuddyCall(string buddyName, ForsakenMarker buddyMarker, ForsakenMarker myMarker, bool soaking, float remainingTime)
+    // No timer: the buddy line stays up for the whole phase.
+    public static CallBlock BuildBuddyCall(string buddyName, ForsakenMarker buddyMarker, ForsakenMarker myMarker, bool soaking)
     {
         var segments = new List<P4CallSegment> { new("Buddy", P4CallTone.Muted), FormatMarker(buddyMarker) };
         if (soaking && buddyMarker != ForsakenMarker.None && myMarker != ForsakenMarker.None)
@@ -173,7 +185,7 @@ public sealed class P2Tracker : IDisposable
                 : new P4CallSegment("SAME TOWER", P4CallTone.In));
         }
 
-        return new CallBlock(remainingTime, [new P4CallLine(segments)], $"Buddy: {buddyName}");
+        return new CallBlock(float.NaN, [new P4CallLine(segments)], $"Buddy: {buddyName}");
     }
 
     public static CallBlock BuildEndsCall(bool isPast, float remainingTime)
@@ -200,7 +212,7 @@ public sealed class P2Tracker : IDisposable
         return stackGroup ? StackGroupSoakSets : OtherGroupSoakSets;
     }
 
-    private bool? IsStackGroup(uint localId, uint? buddyId)
+    private bool? IsStackGroup(uint localId, uint? buddyId, bool rangedNoFlex)
     {
         var mineIsStack = openingMarkers.TryGetValue(localId, out var mine) && mine == ForsakenMarker.Stack;
         if (mineIsStack)
@@ -208,12 +220,34 @@ public sealed class P2Tracker : IDisposable
             return true;
         }
 
-        if (buddyId is not { } id)
+        if (buddyId is { } id)
+        {
+            return openingMarkers.TryGetValue(id, out var theirs) && theirs == ForsakenMarker.Stack;
+        }
+
+        if (!rangedNoFlex)
         {
             return null;
         }
 
-        return openingMarkers.TryGetValue(id, out var theirs) && theirs == ForsakenMarker.Stack;
+        // A ranged player's buddy is one of the melee. If both or neither melee hold the stack, the group is known
+        // without picking a buddy; with exactly one, it depends on which melee is the buddy.
+        var melee = Plugin.ObjectTable
+            .OfType<IPlayerCharacter>()
+            .Where(player => player.EntityId != localId && (player.ClassJob.ValueNullable?.Role ?? 0) == 2)
+            .Select(player => player.EntityId)
+            .ToList();
+        if (melee.Count == 0 || melee.Any(meleeId => !openingMarkers.ContainsKey(meleeId)))
+        {
+            return null;
+        }
+
+        var meleeStacks = melee.Count(meleeId => openingMarkers[meleeId] == ForsakenMarker.Stack);
+        return meleeStacks == 0
+            ? false
+            : meleeStacks == melee.Count
+                ? true
+                : null;
     }
 
     private IPlayerCharacter? FindBuddy()
