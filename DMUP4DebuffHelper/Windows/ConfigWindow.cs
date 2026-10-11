@@ -113,7 +113,6 @@ public sealed class ConfigWindow : Window, IDisposable
         }
 
         P2BuddySettings.DrawBuddyCombo(plugin);
-        P2BuddySettings.DrawRangedCheckbox(plugin);
         ImGui.TextDisabled("Buddies: MT/H1, OT/H2, M1/R1, M2/R2. Used for your soak group and the buddy's marker.");
 
         ImGui.Separator();

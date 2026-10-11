@@ -139,30 +139,19 @@ public sealed class HelperWindow : Window, IDisposable
         }
 
         ImGui.Spacing();
-        DrawP2BuddyPrompt(isPreview);
+        DrawP2BuddyPrompt();
         DrawPhaseCalls(calls, "Waiting for Forsaken.");
     }
 
-    // Shown only while no buddy is chosen; ranged players only need one when the soak group is ambiguous.
-    private void DrawP2BuddyPrompt(bool isPreview)
+    // Shown only while no buddy is chosen: everyone needs one to know whether their pair started with the stack.
+    private void DrawP2BuddyPrompt()
     {
-        var configuration = plugin.Configuration;
-        if (!string.IsNullOrWhiteSpace(configuration.P2BuddyName))
-        {
-            return;
-        }
-
-        if (configuration.P2RangedNoFlex && (isPreview || !plugin.P2.GroupUnknown))
+        if (!string.IsNullOrWhiteSpace(plugin.Configuration.P2BuddyName))
         {
             return;
         }
 
         P2BuddySettings.DrawBuddyCombo(plugin);
-        if (!configuration.P2RangedNoFlex)
-        {
-            P2BuddySettings.DrawRangedCheckbox(plugin);
-        }
-
         ImGui.Spacing();
     }
 
@@ -181,15 +170,12 @@ public sealed class HelperWindow : Window, IDisposable
     private List<CallBlock> GetPreviewP2Calls()
     {
         // Other group (soaks sets 4-7) during tower set 2, holding a cone, with a circle buddy, while Kefka casts Past's End.
-        var calls = new List<CallBlock>();
-        if (!plugin.Configuration.P2RangedNoFlex)
-        {
-            calls.Add(P2Tracker.BuildBuddyCall("Party Member 2", ForsakenMarker.Circle, ForsakenMarker.Cone, soaking: false));
-        }
-
-        calls.Add(P2Tracker.BuildSetCall(2, ForsakenMarker.Cone, soaksFirst: false, 6.3f));
-        calls.Add(P2Tracker.BuildEndsCall(isPast: true, 4.1f));
-        return calls;
+        return
+        [
+            P2Tracker.BuildBuddyCall("Party Member 2", ForsakenMarker.Circle, ForsakenMarker.Cone, soaking: false),
+            P2Tracker.BuildSetCall(2, ForsakenMarker.Cone, soaksFirst: false, 6.3f),
+            P2Tracker.BuildEndsCall(isPast: true, 4.1f),
+        ];
     }
 
     private static List<CallBlock> GetPreviewP1Calls()
@@ -594,7 +580,7 @@ public sealed class HelperWindow : Window, IDisposable
 
         if (selectedPreviewMode == DmuHelperDisplayMode.P2Calls)
         {
-            DrawP2BuddyPrompt(isPreview: true);
+            DrawP2BuddyPrompt();
             DrawPhaseCalls(GetPreviewP2Calls(), "Waiting for Forsaken.");
             return;
         }

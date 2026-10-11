@@ -33,9 +33,6 @@ public sealed class Configuration : IPluginConfiguration
     // Character name of the P2 Forsaken buddy (MT/H1, OT/H2, M1/R1, M2/R2).
     public string P2BuddyName { get; set; } = string.Empty;
 
-    // Ranged players don't flex, so they skip the buddy line and only need a buddy when the soak group is ambiguous.
-    public bool P2RangedNoFlex { get; set; }
-
     public bool ShowP4Active { get; set; } = true;
 
     public bool ShowP4Calls { get; set; } = true;

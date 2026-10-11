@@ -53,19 +53,4 @@ internal static class P2BuddySettings
 
         ImGui.EndCombo();
     }
-
-    public static void DrawRangedCheckbox(Plugin plugin)
-    {
-        var rangedNoFlex = plugin.Configuration.P2RangedNoFlex;
-        if (ImGui.Checkbox("I'm ranged, no flex", ref rangedNoFlex))
-        {
-            plugin.Configuration.P2RangedNoFlex = rangedNoFlex;
-            plugin.SaveConfiguration();
-        }
-
-        if (ImGui.IsItemHovered())
-        {
-            ImGui.SetTooltip("Hides the buddy line. Your soak group is worked out from the melee players' markers instead,\nand the buddy picker only appears when exactly one melee has the stack.");
-        }
-    }
 }
